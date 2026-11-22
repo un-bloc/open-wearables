@@ -6,6 +6,7 @@ import os
 os.environ["OW_IGNORE_ENV_FILE"] = "1"
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("MASTER_KEY", "dGVzdC1tYXN0ZXIta2V5LWZvci10ZXN0aW5nLW9ubHk=")  # base64 test key
+os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "Gf_yzFsDXgDPIWOepxxdw6V9M7oU9qbXIHiB5tsq_cc=")  # Fernet test key
 os.environ["LOG_FORMAT"] = "legacy"
 os.environ["LOG_LEVEL"] = ""
 os.environ["OTEL_ENABLED"] = "false"

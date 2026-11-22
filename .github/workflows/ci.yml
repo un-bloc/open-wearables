@@ -88,6 +88,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      TOKEN_ENCRYPTION_KEY: Gf_yzFsDXgDPIWOepxxdw6V9M7oU9qbXIHiB5tsq_cc=
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -135,6 +137,7 @@ jobs:
       TEST_REDIS_URL: redis://localhost:6379/0
       SECRET_KEY: test-secret-key-for-ci
       MASTER_KEY: dGVzdC1tYXN0ZXIta2V5LWZvci10ZXN0aW5nLW9ubHk=
+      TOKEN_ENCRYPTION_KEY: Gf_yzFsDXgDPIWOepxxdw6V9M7oU9qbXIHiB5tsq_cc=
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python

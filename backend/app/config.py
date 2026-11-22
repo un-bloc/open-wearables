@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote
 
+from cryptography.fernet import Fernet, MultiFernet
 from pydantic import AnyHttpUrl, Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -92,6 +93,11 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     token_lifetime: int = 3600
+
+    # PROVIDER TOKEN ENCRYPTION
+    # Fernet key(s) the provider OAuth tokens are encrypted with in the database, comma-separated: the first
+    # one encrypts, all of them decrypt (key rotation). Required, see check_token_encryption_key.
+    token_encryption_key: SecretStr = SecretStr("")
 
     # VALIDATION SETTINGS
     min_password_length: int = 8
@@ -384,6 +390,12 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def check_token_encryption_key(self) -> "Settings":
+        """Fail at startup rather than store a provider token unencrypted."""
+        build_token_cipher(self.token_encryption_key.get_secret_value())
+        return self
+
+    @model_validator(mode="after")
     def derive_svix_jwt_secret(self) -> "Settings":
         if self.svix_jwt_secret is None or self.svix_jwt_secret.get_secret_value() == "":
             self.svix_jwt_secret = SecretStr(self.secret_key)
@@ -538,6 +550,32 @@ class Settings(BaseSettings):
     # 1. environment variables
     # 2. .env
     # 3. default values in pydantic settings
+
+
+_TOKEN_KEY_HELP = (
+    'Generate one with: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+)
+
+
+@lru_cache
+def build_token_cipher(keys: str) -> MultiFernet:
+    """Cipher for TOKEN_ENCRYPTION_KEY, comma-separated Fernet keys: the first encrypts, all of them decrypt.
+
+    Raises RuntimeError, not ValueError: pydantic turns a ValueError into a ValidationError that prints its
+    input, which would put a mistyped key into the startup log.
+    """
+    if not keys.strip():
+        raise RuntimeError(f"TOKEN_ENCRYPTION_KEY is not set. Provider tokens are stored encrypted. {_TOKEN_KEY_HELP}")
+    fernets = []
+    for position, key in enumerate(keys.split(","), start=1):
+        try:
+            fernets.append(Fernet(key.strip()))
+        except ValueError:
+            raise RuntimeError(
+                f"TOKEN_ENCRYPTION_KEY entry {position} is not a Fernet key (32 url-safe base64-encoded bytes). "
+                f"Separate several keys with commas. {_TOKEN_KEY_HELP}"
+            ) from None
+    return MultiFernet(fernets)
 
 
 @lru_cache()
