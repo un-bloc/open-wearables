@@ -33,6 +33,9 @@ class Settings(BaseSettings):
         env_file=str(Path(__file__).parent.parent / "config" / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
+        # A validation error would otherwise print the whole settings input, every secret in it (the token
+        # encryption key, SECRET_KEY, the database password), into the startup log.
+        hide_input_in_errors=True,
         # default env_file solution search .env every time BaseSettings is instantiated
         # dotenv search .env when module is imported, without usecwd it starts from the file it was called
     )

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
@@ -271,6 +271,21 @@ class TestTokenEncryptionKeySetting:
 
         assert Settings(token_encryption_key=first).token_encryption_key.get_secret_value() == first
         Settings(token_encryption_key=f" {first} , {second}\n")
+
+    def test_an_error_about_another_setting_does_not_print_the_input_it_was_given(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # For a missing field pydantic prints the whole input, every value in it, unless told not to.
+        monkeypatch.delenv("SECRET_KEY")
+        key = _new_key()
+
+        with pytest.raises(ValidationError) as excinfo:
+            Settings(_env_file=None, token_encryption_key=key)
+
+        message = str(excinfo.value)
+        assert "secret_key" in message
+        assert "input_value" not in message
+        assert key[-12:] not in message
 
     def test_the_key_is_not_shown_in_the_settings_repr(self) -> None:
         key = _new_key()
