@@ -164,6 +164,7 @@ The defaults in `.env.example` are development values. Override at least these f
 | `API_BASE_URL` | public URL of the API, used for provider OAuth redirect URIs |
 | `VITE_API_URL` | URL of the API as reached from the browser |
 | `LOG_FORMAT` | `json` if a log collector reads the container output (see [Logs](#logs)) |
+| `TOKEN_ENCRYPTION_KEY` | a Fernet key that encrypts the stored provider tokens (required: the backend does not start without it). Generate one with `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`, see [Provider token encryption](#provider-token-encryption) |
 
 `VITE_API_URL` is a frontend variable and is not part of `.env.example`—add it to the same `.env`. For a local trial of this stack, set it to `http://localhost:8000`; in production it is typically the same value as `API_BASE_URL`.
 
@@ -204,6 +205,63 @@ By default every mobile SDK sync payload is queued in Redis. That's fine for ong
 In practice you will put the API and frontend behind a reverse proxy with TLS instead of exposing the container ports directly.
 
 To add Flower, run another backend container with `command: scripts/start/flower.sh` and publish port `5555`. To enable outgoing webhooks, add a `svix-server` service and a `svix` database; the development `docker-compose.yml` shows the wiring.
+
+## Provider token encryption
+
+The access and refresh tokens of the provider connections (Garmin, Oura, Whoop, ...) are stored encrypted. `TOKEN_ENCRYPTION_KEY` holds the key and the backend does not start without a valid one: the `app`, `celery-worker` and `celery-beat` containers all need the same value, and the log says so when it is missing or malformed.
+
+Generate a key with either command:
+
+```bash
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+openssl rand -base64 32 | tr '+/' '-_'
+```
+
+Keep a copy of it outside the database. Without it the stored tokens cannot be read, and every user has to connect their devices again.
+
+### Rotating the key
+
+`TOKEN_ENCRYPTION_KEY` takes a comma-separated list. The first key encrypts and every key decrypts, so tokens written with an older key stay readable.
+
+1. Append the new key to the list for `app`, `celery-worker` and `celery-beat` (`old-key,new-key`) and restart them. Every process can now read both keys, while the old one still writes.
+2. Move the new key to the front (`new-key,old-key`) and restart them. If you restart all three at the same moment, steps 1 and 2 can be one.
+3. Re-encrypt the stored tokens with the new key. Tokens are rewritten with the first key whenever they are saved, but a refresh token that a provider does not rotate would stay on the old key, so do it explicitly:
+
+   ```bash
+   docker compose exec app uv run python - <<'EOF'
+   from sqlalchemy.orm.attributes import flag_modified
+
+   from app.database import SessionLocal
+   from app.models import UserConnection
+
+   with SessionLocal() as db:
+       for connection in db.query(UserConnection).filter(UserConnection.access_token.is_not(None)):
+           flag_modified(connection, "access_token")
+           flag_modified(connection, "refresh_token")
+       db.commit()
+   EOF
+   ```
+
+4. Remove the old key from the list and restart.
+
+### Upgrading from a release without encryption
+
+Releases without token encryption store the tokens as plain text and cannot read encrypted ones: a process of such a release that reads an encrypted token sends it to the provider, is rejected and revokes the connection, and the user has to connect again. Do not run it next to the new release against the same database:
+
+1. Set `TOKEN_ENCRYPTION_KEY` for `app`, `celery-worker` and `celery-beat`. Releases without encryption ignore it, so this can be done first.
+2. Back up the database, stop all three, then start the new images. The `app` container applies the migration that encrypts the stored tokens before the API starts (a legacy plain-text token is also read as it is and encrypted by its next write). Check that none is left:
+
+   ```sql
+   SELECT count(*) FROM user_connection
+   WHERE (access_token IS NOT NULL AND access_token NOT LIKE 'enc1:%')
+      OR (refresh_token IS NOT NULL AND refresh_token NOT LIKE 'enc1:%');
+   ```
+
+To go back to a release without encryption, first decrypt the tokens with the new image and the same `TOKEN_ENCRYPTION_KEY`, with `app`, `celery-worker` and `celery-beat` stopped, and only then start the older images. `<revision>` is the newest migration of the release you go back to (`e9413ac05e3b` for 0.11.0):
+
+```bash
+docker compose run --rm app uv run alembic downgrade <revision>
+```
 
 ## Logs
 

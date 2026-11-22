@@ -190,6 +190,7 @@ Create a `.env` file in the `config/` directory (see `config/.env.example` for r
 - Database connection settings
 - OAuth provider credentials
 - JWT secrets
+- `TOKEN_ENCRYPTION_KEY` (Fernet key that encrypts the stored provider tokens, see `config/.env.example`)
 - Other service configurations
 
 ## Additional Services
